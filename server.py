@@ -1,18 +1,17 @@
-from flask import Flask, request, send_file, Response
-from flask_cors import CORS  # استيراد مكتبة CORS
 import os
-import yt_dlp  # استيراد yt-dlp بدلًا من youtube-dl
+from flask import Flask, request, send_file
+import yt_dlp
 
-# إنشاء تطبيق Flask
 app = Flask(__name__)
-CORS(app)  # تمكين CORS لجميع المسارات
 
-# مجلد التنزيلات
-DOWNLOAD_FOLDER = 'downloads'
+# استبدال الأسماء القديمة بالأسماء الجديدة
+DOWNLOAD_FOLDER = os.getenv('DOWNLOAD_FOLDER', 'downloads')
+valid_formats = os.getenv('FORMATS', 'mp4,webm').split(',')
+
+# إنشاء مجلد التنزيلات إذا لم يكن موجودًا
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
-# مسار لتحميل الفيديو
 @app.route('/download', methods=['GET'])
 def download():
     video_url = request.args.get('url')
@@ -22,6 +21,10 @@ def download():
     # التحقق من أن المستخدم أدخل رابط وتنسيق
     if not video_url or not format:
         return "الرجاء إدخال رابط الفيديو والتنسيق المطلوب!", 400
+
+    # التحقق من صحة تنسيق الفيديو
+    if format not in valid_formats:
+        return f"تنسيق الفيديو غير صالح! يرجى اختيار {', '.join(valid_formats)}.", 400
 
     # إعداد خيارات yt-dlp
     ydl_opts = {
@@ -38,11 +41,25 @@ def download():
             file_path = ydl.prepare_filename(info_dict)
 
         # إرجاع الملف للمستخدم
-        return send_file(file_path, as_attachment=True)
+        response = send_file(file_path, as_attachment=True)
+
+        # حذف الملف بعد إرساله
+        def remove_file(response):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Error deleting file: {str(e)}")
+            return response
+
+        response.call_on_close(remove_file)
+        return response
+
     except Exception as e:
         # إرجاع رسالة الخطأ
         return f"حدث خطأ أثناء التحميل: {str(e)}", 500
 
-# تشغيل الخادم
 if __name__ == '__main__':
-    app.run(port=3000)
+    # استخدام المنفذ من المتغير البيئي أو 3000 كافتراضي
+    port = int(os.getenv('PORT', 3000))
+    # تشغيل التطبيق على جميع الواجهات (0.0.0.0)
+    app.run(host='0.0.0.0', port=port)
