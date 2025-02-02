@@ -1,16 +1,25 @@
 import os
+import logging
 from flask import Flask, request, send_file, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 import yt_dlp
 
+# Initialize Flask app
 app = Flask(__name__, static_folder="static", template_folder="templates")
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app)  # Allow all origins
 
+# Configuration
 DOWNLOAD_FOLDER = os.getenv('DOWNLOAD_FOLDER', 'downloads')
 valid_formats = os.getenv('FORMATS', 'mp4,webm').split(',')
+valid_qualities = ['144', '240', '360', '480', '720', '1080', 'best']
 
+# Ensure download folder exists
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @app.route('/')
 def home():
@@ -22,14 +31,19 @@ def download():
     format = request.args.get('format')
     quality = request.args.get('quality', 'best')
 
+    # Validate input
     if not video_url or not format:
         return jsonify({"error": "الرجاء إدخال رابط الفيديو والتنسيق المطلوب!"}), 400
 
     if format not in valid_formats:
         return jsonify({"error": f"تنسيق الفيديو غير صالح! يرجى اختيار {', '.join(valid_formats)}"}), 400
 
+    if quality not in valid_qualities:
+        return jsonify({"error": f"جودة الفيديو غير صالحة! يرجى اختيار {', '.join(valid_qualities)}"}), 400
+
+    # Configure yt-dlp options
     ydl_opts = {
-        'format': f'bestvideo[ext={format}]+bestaudio/best' if format == 'mp4' else 'bestaudio/best',
+        'format': f'bestvideo[height<={quality}][ext={format}]+bestaudio/best' if format == 'mp4' else 'bestaudio/best',
         'outtmpl': os.path.join(DOWNLOAD_FOLDER, '%(title)s.%(ext)s'),
         'restrictfilenames': True,
         'noplaylist': True,
@@ -43,20 +57,27 @@ def download():
         if not os.path.exists(file_path):
             return jsonify({"error": "الملف غير موجود!"}), 404
 
-        response = send_file(file_path, as_attachment=True)
+        # Send the file to the client
+        response = send_from_directory(DOWNLOAD_FOLDER, os.path.basename(file_path), as_attachment=True)
         response.headers['Access-Control-Allow-Origin'] = '*'
 
+        # Clean up the file after sending
         def remove_file():
             try:
                 os.remove(file_path)
+                logger.info(f"تم حذف الملف: {file_path}")
             except Exception as e:
-                print(f"Error deleting file: {str(e)}")
+                logger.error(f"حدث خطأ أثناء حذف الملف: {str(e)}")
 
         response.call_on_close(remove_file)
         return response
 
-    except Exception as e:
+    except yt_dlp.utils.DownloadError as e:
+        logger.error(f"حدث خطأ أثناء التحميل: {str(e)}")
         return jsonify({"error": f"حدث خطأ أثناء التحميل: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"حدث خطأ غير متوقع: {str(e)}")
+        return jsonify({"error": f"حدث خطأ غير متوقع: {str(e)}"}), 500
 
 @app.route('/static/<path:filename>')
 def static_files(filename):

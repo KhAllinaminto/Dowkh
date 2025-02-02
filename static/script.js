@@ -22,12 +22,15 @@ document.getElementById('download-btn').addEventListener('click', async function
     const quality = document.getElementById('quality').value;
     const progressBar = document.querySelector('.progress-bar');
     const progress = document.querySelector('.progress');
+    const downloadBtn = document.getElementById('download-btn');
 
     if (!videoUrl) {
         showMessage("الرجاء إدخال رابط الفيديو!", "red");
         return;
     }
 
+    // Disable the download button during the process
+    downloadBtn.disabled = true;
     showMessage("جاري معالجة طلبك...", "green");
     progressBar.style.display = 'block';
     progress.style.width = '0%';
@@ -36,10 +39,18 @@ document.getElementById('download-btn').addEventListener('click', async function
         const response = await fetch(`http://localhost:10000/download?url=${encodeURIComponent(videoUrl)}&format=${format}&quality=${quality}`);
 
         if (!response.ok) {
-            const errorText = await response.json();
-            throw new Error(`حدث خطأ أثناء التحميل: ${errorText.error}`);
+            // Handle server errors
+            let errorText = "حدث خطأ أثناء التحميل!";
+            try {
+                const errorData = await response.json();
+                errorText = errorData.error || errorText;
+            } catch (e) {
+                console.error('Failed to parse error response:', e);
+            }
+            throw new Error(errorText);
         }
 
+        // Handle the file download
         const contentLength = response.headers.get('Content-Length');
         let receivedLength = 0;
         const reader = response.body.getReader();
@@ -55,9 +66,11 @@ document.getElementById('download-btn').addEventListener('click', async function
             if (contentLength) {
                 const progressPercent = (receivedLength / contentLength) * 100;
                 progress.style.width = `${progressPercent}%`;
+                showMessage(`جاري التحميل... ${Math.round(progressPercent)}%`, "green");
             }
         }
 
+        // Create and trigger the download
         const blob = new Blob(chunks);
         const link = document.createElement('a');
         link.href = window.URL.createObjectURL(blob);
@@ -71,7 +84,11 @@ document.getElementById('download-btn').addEventListener('click', async function
         console.error('حدث خطأ أثناء التحميل:', error);
         showMessage(error.message, "red");
     } finally {
-        progressBar.style.display = 'none';
+        // Re-enable the download button and reset the progress bar
+        downloadBtn.disabled = false;
+        setTimeout(() => {
+            progressBar.style.display = 'none';
+        }, 1000); // Delay hiding the progress bar
     }
 });
 
